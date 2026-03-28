@@ -1,10 +1,12 @@
 (function () {
   'use strict';
 
-  const BUTTON_ID = 'ljc-copy-btn';
-  const TOAST_ID = 'ljc-toast';
+  if (window.__ljcInjected) return;
+  window.__ljcInjected = true;
 
-  // ─── Selectors for list/collection pages (/jobs/collections/, /jobs/search/)
+  const BUTTON_ID = 'ljc-copy-btn';
+  const TOAST_ID  = 'ljc-toast';
+
   const JOB_TITLE_SELECTORS = [
     '.job-details-jobs-unified-top-card__job-title h1',
     '.job-details-jobs-unified-top-card__job-title',
@@ -54,33 +56,34 @@
     return null;
   }
 
-  // ─── Find element by button text (for hashed-class pages like /jobs/view/) ──
-  function findButtonByText(texts) {
-    const buttons = document.querySelectorAll('button');
-    for (const btn of buttons) {
-      const text = btn.innerText?.trim().toLowerCase();
-      if (texts.some(t => text === t.toLowerCase())) return btn;
+  // ─── Find anchor to inject button next to ─────────────────────────────────
+  // On /jobs/collections/ pages: uses class-based selectors (Apply button area)
+  // On /jobs/view/ pages: LinkedIn uses hashed classes, so we find Save button by text
+  function findAnchorEl() {
+    // Try class-based first (works on list/collection pages)
+    const byClass = queryFirst(INJECT_ANCHOR_SELECTORS);
+    if (byClass) return { el: byClass, mode: 'after' };
+
+    // Fallback: find Save/Saved button by visible text for /jobs/view/ pages
+    for (const btn of document.querySelectorAll('button')) {
+      const txt = btn.innerText?.trim().toLowerCase();
+      if (txt === 'save' || txt === 'saved') {
+        // Return the button's parent so we insert after it at the same level
+        return { el: btn.parentElement || btn, mode: 'after' };
+      }
     }
     return null;
   }
 
-  // ─── Find job title on hashed-class pages by looking for the main <h1> ──────
   function findJobTitleEl() {
-    // Try known selectors first
-    const bySelector = queryFirst(JOB_TITLE_SELECTORS);
-    if (bySelector) return bySelector;
-    // Fallback: first h1 on page (on /jobs/view/ the job title is always the only h1)
-    return document.querySelector('h1');
+    return queryFirst(JOB_TITLE_SELECTORS) || document.querySelector('h1');
   }
 
-  // ─── Find company on hashed-class pages ───────────────────────────────────
   function findCompanyEl() {
     const bySelector = queryFirst(COMPANY_SELECTORS);
     if (bySelector) return bySelector;
-    // Fallback: find anchor near the h1 (company link is always right below title)
     const h1 = document.querySelector('h1');
     if (h1) {
-      // Walk up to parent, then find first anchor inside siblings
       const parent = h1.closest('div, section');
       if (parent) {
         const anchor = parent.querySelector('a[href*="/company/"]');
@@ -90,23 +93,14 @@
     return null;
   }
 
-  // ─── Find description on hashed-class pages ───────────────────────────────
   function findDescriptionEl() {
-    // Try known selectors first
     const bySelector = queryFirst(DESCRIPTION_SELECTORS);
     if (bySelector) return bySelector;
-
-    // Fallback: find the largest text block on page (job description is always
-    // the biggest chunk of text content on a /jobs/view/ page)
-    const candidates = document.querySelectorAll('article, section, div');
-    let best = null;
-    let bestLen = 0;
-    for (const el of candidates) {
-      // Skip nav, header, footer
+    let best = null, bestLen = 0;
+    for (const el of document.querySelectorAll('article, section, div')) {
       if (['NAV','HEADER','FOOTER'].includes(el.tagName)) continue;
       if (el.querySelector('nav, header')) continue;
       const len = (el.innerText || '').trim().length;
-      // Must be a leaf-ish container (not the entire body)
       const childBlocks = el.querySelectorAll('article, section').length;
       if (len > bestLen && len < 50000 && childBlocks === 0) {
         bestLen = len;
@@ -116,48 +110,25 @@
     return best;
   }
 
-  // ─── Find anchor element to inject button next to ─────────────────────────
-  function findAnchorEl() {
-    // Try known selectors first (works on list/collection pages)
-    const bySelector = queryFirst(INJECT_ANCHOR_SELECTORS);
-    if (bySelector) return bySelector;
-
-    // Fallback for /jobs/view/: use "Save" button as anchor (always present)
-    const saveBtn = findButtonByText(['Save', 'Saved']);
-    if (saveBtn) return saveBtn.closest('div') || saveBtn.parentElement;
-
-    return null;
-  }
-
   function extractDescription() {
     const descEl = findDescriptionEl();
     if (!descEl) return null;
     const clone = descEl.cloneNode(true);
     clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
-    clone.querySelectorAll('li').forEach(li => {
-      li.prepend('• ');
-      li.append('\n');
-    });
-    clone.querySelectorAll('p, h1, h2, h3, h4, h5, h6, div').forEach(el => {
-      el.append('\n');
-    });
-    const text = clone.innerText || clone.textContent || '';
-    return text.replace(/\n{3,}/g, '\n\n').trim();
+    clone.querySelectorAll('li').forEach(li => { li.prepend('• '); li.append('\n'); });
+    clone.querySelectorAll('p, h1, h2, h3, h4, h5, h6, div').forEach(el => el.append('\n'));
+    return (clone.innerText || clone.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
   }
 
   function buildClipboardText() {
-    const titleEl = findJobTitleEl();
-    const companyEl = findCompanyEl();
-    const locationEl = queryFirst(LOCATION_SELECTORS);
+    const title       = findJobTitleEl()?.innerText?.trim()                || 'Job Title Not Found';
+    const company     = findCompanyEl()?.innerText?.trim()                 || 'Company Not Found';
+    const location    = queryFirst(LOCATION_SELECTORS)?.innerText?.trim() || '';
     const description = extractDescription();
-    const title = titleEl?.innerText?.trim() || 'Job Title Not Found';
-    const company = companyEl?.innerText?.trim() || 'Company Not Found';
-    const location = locationEl?.innerText?.trim() || '';
-    const url = window.location.href;
     let text = `JOB TITLE: ${title}\n`;
     text += `COMPANY: ${company}\n`;
     if (location) text += `LOCATION: ${location}\n`;
-    text += `URL: ${url}\n`;
+    text += `URL: ${window.location.href}\n`;
     text += `\n${'─'.repeat(60)}\n\n`;
     text += description || 'Description not found.';
     return text;
@@ -171,9 +142,7 @@
     toast.className = `ljc-toast ljc-toast--${type}`;
     toast.innerHTML = `<span>${type === 'success' ? '✓' : '✕'}</span> ${message}`;
     document.body.appendChild(toast);
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => toast.classList.add('ljc-toast--visible'));
-    });
+    requestAnimationFrame(() => requestAnimationFrame(() => toast.classList.add('ljc-toast--visible')));
     setTimeout(() => {
       toast.classList.remove('ljc-toast--visible');
       setTimeout(() => toast.remove(), 400);
@@ -181,30 +150,22 @@
   }
 
   async function copyToClipboard(text) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {
+    try { await navigator.clipboard.writeText(text); return true; }
+    catch {
       try {
         const ta = document.createElement('textarea');
         ta.value = text;
         ta.style.cssText = 'position:fixed;opacity:0;pointer-events:none;';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        ta.remove();
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
         return true;
-      } catch {
-        return false;
-      }
+      } catch { return false; }
     }
   }
 
   async function handleCopyClick(btn) {
     btn.disabled = true;
     btn.textContent = 'Copying…';
-    const text = buildClipboardText();
-    const success = await copyToClipboard(text);
+    const success = await copyToClipboard(buildClipboardText());
     if (success) {
       btn.textContent = '✓ Copied!';
       btn.classList.add('ljc-btn--success');
@@ -222,120 +183,114 @@
   }
 
   function injectButton() {
-    const existingBtn = document.getElementById(BUTTON_ID);
-    const anchor = findAnchorEl();
+    const existing = document.getElementById(BUTTON_ID);
+    const anchor   = findAnchorEl();
 
-    if (existingBtn) {
-      if (!anchor || !document.body.contains(existingBtn)) {
-        existingBtn.remove();
-      } else {
-        return;
-      }
+    if (existing) {
+      if (!anchor || !document.body.contains(existing)) existing.remove();
+      else return;
     }
     if (!anchor) return;
 
     const btn = document.createElement('button');
-    btn.id = BUTTON_ID;
+    btn.id        = BUTTON_ID;
     btn.className = 'ljc-btn';
     btn.textContent = '📋 Copy Job Description';
     btn.title = 'Copy full job description to clipboard';
     btn.addEventListener('click', () => handleCopyClick(btn));
-    anchor.appendChild(btn);
+
+    anchor.el.insertAdjacentElement('afterend', btn);
   }
 
-  // ─── SPA navigation detection ─────────────────────────────────────────────
+  // ─── SPA navigation ────────────────────────────────────────────────────────
   let lastUrl = location.href;
-
   function onUrlChange() {
-    const currentUrl = location.href;
-    if (currentUrl !== lastUrl) {
-      lastUrl = currentUrl;
+    const current = location.href;
+    if (current !== lastUrl) {
+      lastUrl = current;
       const old = document.getElementById(BUTTON_ID);
       if (old) old.remove();
-      [800, 1500, 2500, 4000].forEach(delay => setTimeout(injectButton, delay));
+      [800, 1500, 2500, 4000].forEach(d => setTimeout(injectButton, d));
     }
   }
-
-  const _pushState = history.pushState.bind(history);
-  history.pushState = function (...args) {
-    _pushState(...args);
-    onUrlChange();
-  };
-  const _replaceState = history.replaceState.bind(history);
-  history.replaceState = function (...args) {
-    _replaceState(...args);
-    onUrlChange();
-  };
+  const _push = history.pushState.bind(history);
+  history.pushState = function (...a) { _push(...a); onUrlChange(); };
+  const _replace = history.replaceState.bind(history);
+  history.replaceState = function (...a) { _replace(...a); onUrlChange(); };
   window.addEventListener('popstate', onUrlChange);
 
-  // ─── MutationObserver ─────────────────────────────────────────────────────
   let debounceTimer = null;
   const observer = new MutationObserver(() => {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(injectButton, 600);
   });
   observer.observe(document.body, { childList: true, subtree: true });
+  [1000, 2000, 3500].forEach(d => setTimeout(injectButton, d));
 
-  [1000, 2000, 3500].forEach(delay => setTimeout(injectButton, delay));
-
-  // ─── Message listener for popup ───────────────────────────────────────────
+  // ─── Message listener ──────────────────────────────────────────────────────
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.action === 'scrapeCurrentJob') {
-      const text = buildClipboardText();
-      const titleEl = findJobTitleEl();
-      const companyEl = findCompanyEl();
-      const locationEl = queryFirst(LOCATION_SELECTORS);
-      const description = extractDescription();
       sendResponse({
-        title: titleEl?.innerText?.trim() || 'N/A',
-        company: companyEl?.innerText?.trim() || 'N/A',
-        location: locationEl?.innerText?.trim() || 'N/A',
-        url: window.location.href,
-        description: description || '',
-        fullText: text
+        title:       findJobTitleEl()?.innerText?.trim()                || 'N/A',
+        company:     findCompanyEl()?.innerText?.trim()                 || 'N/A',
+        location:    queryFirst(LOCATION_SELECTORS)?.innerText?.trim() || 'N/A',
+        url:         window.location.href,
+        description: extractDescription() || '',
+        fullText:    buildClipboardText()
       });
     }
     if (msg.action === 'scrapeJobList') {
-      const jobs = scrapeJobList();
-      sendResponse({ jobs });
+      sendResponse({ jobs: scrapeJobList() });
     }
     return true;
   });
 
-  // ─── Scrape job list cards ─────────────────────────────────────────────────
+  // ─── Scrape job list ───────────────────────────────────────────────────────
   function scrapeJobList() {
-    const cards = document.querySelectorAll([
-      '.jobs-search-results__list-item',
-      '.job-card-container',
-      '[data-job-id]',
-      '.scaffold-layout__list-item'
-    ].join(', '));
+    const cards = document.querySelectorAll('[data-occludable-job-id], [data-job-id]');
+    const seen = new Set();
     const results = [];
+
     cards.forEach(card => {
+      const jobId = card.dataset.occludableJobId || card.dataset.jobId;
+      if (!jobId || seen.has(jobId)) return;
+      seen.add(jobId);
+
       const title = card.querySelector([
+        '.job-card-list__title--link',
         '.job-card-list__title',
         '.job-card-container__link strong',
         'a[class*="job-card"] strong',
         '[class*="job-title"]'
-      ].join(', '))?.innerText?.trim() || '';
+      ].join(', '))?.innerText?.trim()
+        || card.getAttribute('aria-label')?.trim()
+        || '';
+
       const company = card.querySelector([
         '.job-card-container__company-name',
+        '.job-card-container__primary-description',
         '.artdeco-entity-lockup__subtitle',
         '[class*="company-name"]',
         '[class*="subtitle"]'
       ].join(', '))?.innerText?.trim() || '';
+
       const location = card.querySelector([
         '.job-card-container__metadata-item',
         '[class*="metadata-item"]',
         '[class*="location"]'
       ].join(', '))?.innerText?.trim() || '';
-      const link = card.querySelector('a[href*="/jobs/view/"]');
-      const url = link ? 'https://www.linkedin.com' + (link.getAttribute('href')?.split('?')[0] || '') : '';
-      const jobId = card.dataset.jobId || card.dataset.occludableJobId || '';
-      if (title || company) {
-        results.push({ title, company, location, url, jobId });
-      }
+
+      const url = `https://www.linkedin.com/jobs/view/${jobId}/`;
+
+      results.push({
+        title:   title   || `Job #${jobId}`,
+        company: company || '—',
+        location,
+        url,
+        jobId
+      });
     });
+
     return results;
   }
 
