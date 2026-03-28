@@ -1,4 +1,4 @@
-# LinkedIn Job Copier — Chrome Extension
+# LinkedIn Job Copier — Browser Extension (Chrome, Edge, Brave)
 
 A browser extension that adds a **"Copy Job Description"** button to LinkedIn job listings, and lets you scrape & export all job cards from a search results page.
 
