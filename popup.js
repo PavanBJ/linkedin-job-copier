@@ -1,87 +1,99 @@
 // LinkedIn Job Copier — Popup Logic
-
 document.addEventListener('DOMContentLoaded', async () => {
   const $ = id => document.getElementById(id);
 
-  // Elements
-  const statusDot     = $('statusDot');
-  const notLinkedIn   = $('notLinkedIn');
-  const mainContent   = $('mainContent');
-  const currentCard   = $('currentJobCard');
-  const copyCurrentBtn= $('copyCurrentBtn');
-  const copyMinimalBtn= $('copyMinimalBtn');
-  const scrapeListBtn = $('scrapeListBtn');
-  const jobList       = $('jobList');
-  const jobListState  = $('jobListState');
-  const listActions   = $('listActions');
-  const copyAllBtn    = $('copyAllBtn');
-  const exportCsvBtn  = $('exportCsvBtn');
+  const statusDot      = $('statusDot');
+  const notLinkedIn    = $('notLinkedIn');
+  const mainContent    = $('mainContent');
+  const currentCard    = $('currentJobCard');
+  const copyCurrentBtn = $('copyCurrentBtn');
+  const copyMinimalBtn = $('copyMinimalBtn');
+  const scrapeListBtn  = $('scrapeListBtn');
+  const jobList        = $('jobList');
+  const jobListState   = $('jobListState');
+  const listActions    = $('listActions');
+  const copyAllBtn     = $('copyAllBtn');
+  const exportCsvBtn   = $('exportCsvBtn');
 
-  let currentJob = null;
-  let scrapedJobs = [];
+  let currentJob   = null;
+  let scrapedJobs  = [];
+  let listRendered = false;  // ✅ guard: prevent double render
 
-  // ─── Get active tab ──────────────────────────────────────────────────────
+  // ─── Get active tab ────────────────────────────────────────────────────────
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const isLinkedIn = tab?.url?.includes('linkedin.com/jobs');
 
   if (!isLinkedIn) {
     statusDot.textContent = 'not on LinkedIn Jobs';
-    statusDot.className = 'status-dot status-dot--not-job';
-    notLinkedIn.hidden = false;
+    statusDot.className   = 'status-dot status-dot--not-job';
+    notLinkedIn.hidden    = false;
     return;
   }
 
   mainContent.hidden = false;
 
-  // ─── Inject content script if needed, then load current job ─────────────
+  // ─── Inject content script if needed ──────────────────────────────────────
   try {
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ['content.js']
-    });
-  } catch (_) {
-    // Already injected, fine
-  }
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+  } catch (_) {}
 
-  // Small delay to let content script settle
   await sleep(400);
-  loadCurrentJob();
 
-  // ─── Load current job details ────────────────────────────────────────────
+  loadCurrentJob();
+  autoScrapeList();
+
+  // ─── Load current job ──────────────────────────────────────────────────────
   async function loadCurrentJob() {
     try {
       const resp = await sendMessage(tab.id, { action: 'scrapeCurrentJob' });
       if (resp && resp.title && resp.title !== 'N/A') {
         currentJob = resp;
         renderCurrentJob(resp);
-        statusDot.textContent = 'ready';
-        statusDot.className = 'status-dot status-dot--ready';
+        statusDot.textContent   = 'ready';
+        statusDot.className     = 'status-dot status-dot--ready';
         copyCurrentBtn.disabled = false;
         copyMinimalBtn.disabled = false;
       } else {
-        currentCard.innerHTML = `<p class="job-card__loading" style="color:#8b949e">No job selected — click a job listing first.</p>`;
-        statusDot.textContent = 'no job selected';
-        statusDot.className = 'status-dot status-dot--not-job';
+        currentCard.innerHTML   = `<p class="job-card__loading" style="color:#8b949e">No job selected — click a job listing first.</p>`;
+        statusDot.textContent   = 'no job selected';
+        statusDot.className     = 'status-dot status-dot--not-job';
       }
     } catch (e) {
       currentCard.innerHTML = `<p class="job-card__loading" style="color:#f87171">Could not read page. Try refreshing.</p>`;
     }
   }
 
+  // ─── Auto-scrape list on open ──────────────────────────────────────────────
+  async function autoScrapeList() {
+    try {
+      const resp = await sendMessage(tab.id, { action: 'scrapeJobList' });
+      const jobs = resp?.jobs || [];
+      if (jobs.length > 0 && !listRendered) {   // ✅ only render if not already done
+        scrapedJobs = jobs;
+        listRendered = true;
+        jobListState.hidden  = true;
+        jobList.hidden       = false;
+        listActions.hidden   = false;
+        scrapeListBtn.textContent = `Scraped (${scrapedJobs.length})`;
+        renderJobList(scrapedJobs);
+      }
+    } catch (_) {}
+  }
+
+  // ─── Render current job card ───────────────────────────────────────────────
   function renderCurrentJob(job) {
     const preview = job.description
       ? job.description.slice(0, 200) + (job.description.length > 200 ? '…' : '')
       : 'No description found';
-
     currentCard.innerHTML = `
       <div class="job-card__title">${escHtml(job.title)}</div>
       <div class="job-card__company">${escHtml(job.company)}</div>
-      ${job.location ? `<div class="job-card__location">📍 ${escHtml(job.location)}</div>` : ''}
+      ${job.location ? `<div class="job-card__location">${escHtml(job.location)}</div>` : ''}
       <div class="job-card__desc-preview">${escHtml(preview)}</div>
     `;
   }
 
-  // ─── Copy current job ────────────────────────────────────────────────────
+  // ─── Copy current job ──────────────────────────────────────────────────────
   copyCurrentBtn.addEventListener('click', async () => {
     if (!currentJob) return;
     await clipboardWrite(currentJob.fullText);
@@ -100,36 +112,38 @@ document.addEventListener('DOMContentLoaded', async () => {
     flashBtn(copyMinimalBtn, '✓ Copied!');
   });
 
-  // ─── Scrape job list ─────────────────────────────────────────────────────
+  // ─── Manual scrape / refresh list ─────────────────────────────────────────
   scrapeListBtn.addEventListener('click', async () => {
     scrapeListBtn.textContent = 'Scraping…';
-    scrapeListBtn.disabled = true;
-
+    scrapeListBtn.disabled    = true;
+    listRendered = false;   // ✅ reset guard so manual refresh always works
     try {
-      const resp = await sendMessage(tab.id, { action: 'scrapeJobList' });
+      const resp  = await sendMessage(tab.id, { action: 'scrapeJobList' });
       scrapedJobs = resp?.jobs || [];
-
       if (scrapedJobs.length === 0) {
-        jobListState.textContent = 'No job cards found on this page. Make sure you\'re on a job search results page.';
+        jobListState.textContent = "No job cards found. Make sure you're on a job search results page.";
         jobListState.hidden = false;
-        jobList.hidden = true;
-        listActions.hidden = true;
+        jobList.hidden      = true;
+        listActions.hidden  = true;
       } else {
         jobListState.hidden = true;
+        jobList.hidden      = false;
+        listActions.hidden  = false;
+        listRendered = true;
         renderJobList(scrapedJobs);
-        jobList.hidden = false;
-        listActions.hidden = false;
       }
     } catch (e) {
       jobListState.textContent = 'Error scraping jobs. Try refreshing the page.';
+      jobListState.hidden = false;
     }
-
     scrapeListBtn.textContent = `Scraped (${scrapedJobs.length})`;
-    scrapeListBtn.disabled = false;
+    scrapeListBtn.disabled    = false;
   });
 
+  // ─── Render job list ───────────────────────────────────────────────────────
   function renderJobList(jobs) {
-    jobList.innerHTML = '';
+    jobList.innerHTML = '';   // ✅ always clear first
+
     jobs.forEach((job, i) => {
       const item = document.createElement('div');
       item.className = 'job-list-item';
@@ -142,17 +156,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         <button class="job-list-item__copy" data-idx="${i}">Copy</button>
       `;
 
-      item.querySelector('.job-list-item__copy').addEventListener('click', async (e) => {
+      item.querySelector('.job-list-item__copy').addEventListener('click', async e => {
         e.stopPropagation();
-        const j = scrapedJobs[i];
-        const text = `Title: ${j.title}\nCompany: ${j.company}\n${j.location ? 'Location: ' + j.location + '\n' : ''}URL: ${j.url}`;
+        const j    = scrapedJobs[i];
+        const text = `Title: ${j.title}\nCompany: ${j.company}${j.location ? '\nLocation: ' + j.location : ''}\nURL: ${j.url}`;
         await clipboardWrite(text);
         const btn = e.target;
         btn.textContent = '✓';
         setTimeout(() => btn.textContent = 'Copy', 1500);
       });
 
-      // Clicking the card opens the job URL
       item.addEventListener('click', () => {
         if (job.url) chrome.tabs.update(tab.id, { url: job.url });
       });
@@ -161,39 +174,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // ─── Copy all jobs as text ────────────────────────────────────────────────
+  // ─── Copy all ──────────────────────────────────────────────────────────────
   copyAllBtn.addEventListener('click', async () => {
     if (!scrapedJobs.length) return;
     const text = scrapedJobs.map((j, i) =>
-      `${i + 1}. ${j.title}\n   Company: ${j.company}\n${j.location ? '   Location: ' + j.location + '\n' : ''}   URL: ${j.url}`
+      `${i + 1}. ${j.title}\nCompany: ${j.company}${j.location ? '\nLocation: ' + j.location : ''}\nURL: ${j.url}`
     ).join('\n\n');
     const full = `LinkedIn Jobs Export — ${new Date().toLocaleDateString()}\n${'─'.repeat(50)}\n\n${text}`;
     await clipboardWrite(full);
     flashBtn(copyAllBtn, '✓ Copied All!');
   });
 
-  // ─── Export CSV ───────────────────────────────────────────────────────────
+  // ─── Export CSV ────────────────────────────────────────────────────────────
   exportCsvBtn.addEventListener('click', () => {
     if (!scrapedJobs.length) return;
     const headers = ['#', 'Title', 'Company', 'Location', 'URL'];
-    const rows = scrapedJobs.map((j, i) => [
-      i + 1,
-      csvEscape(j.title),
-      csvEscape(j.company),
-      csvEscape(j.location),
-      csvEscape(j.url)
+    const rows    = scrapedJobs.map((j, i) => [
+      i + 1, csvEscape(j.title), csvEscape(j.company), csvEscape(j.location), csvEscape(j.url)
     ]);
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const csv  = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
     a.download = `linkedin-jobs-${Date.now()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   });
 
-  // ─── Helpers ──────────────────────────────────────────────────────────────
+  // ─── Helpers ───────────────────────────────────────────────────────────────
   function sendMessage(tabId, msg) {
     return new Promise((resolve, reject) => {
       chrome.tabs.sendMessage(tabId, msg, resp => {
@@ -207,7 +216,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       await navigator.clipboard.writeText(text);
     } catch {
-      // Fallback
       const ta = document.createElement('textarea');
       ta.value = text;
       document.body.appendChild(ta);
@@ -229,13 +237,19 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function escHtml(str) {
     if (!str) return '';
-    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 
   function csvEscape(str) {
-    if (!str) return '""';
+    if (!str) return '';
     return `"${str.replace(/"/g, '""')}"`;
   }
 
-  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+  function sleep(ms) {
+    return new Promise(r => setTimeout(r, ms));
+  }
 });
