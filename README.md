@@ -79,6 +79,15 @@ This extension uses the standard **WebExtensions API (Manifest V3)** which is su
 
 ---
 
+
+## ☕ Support
+
+If this extension saved you some time or made your job hunt a little easier, I'd love a coffee! 
+
+[☕ Buy me a coffee on Topmate](https://topmate.io/pavan_bj/2023152)
+
+---
+
 ## 📁 File Structure
 
 ```
