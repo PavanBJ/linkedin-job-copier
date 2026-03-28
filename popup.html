@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>LinkedIn Job Copier</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header__logo">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+          <rect x="2" y="2" width="20" height="20" rx="4" fill="#0a66c2"/>
+          <path d="M7 10h10M7 14h7" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+          <rect x="15" y="12" width="4" height="4" rx="1" fill="#fff" opacity="0.9"/>
+        </svg>
+      </div>
+      <div class="header__text">
+        <h1 class="header__title">Job Copier</h1>
+        <p class="header__sub">LinkedIn · <span id="statusDot" class="status-dot status-dot--detecting">detecting…</span></p>
+      </div>
+    </header>
+
+    <!-- Not on LinkedIn message -->
+    <div id="notLinkedIn" class="state-msg" hidden>
+      <div class="state-msg__icon">🔗</div>
+      <p>Open a LinkedIn Jobs page to get started.</p>
+      <a href="https://www.linkedin.com/jobs/" target="_blank" class="btn btn--outline">Go to LinkedIn Jobs →</a>
+    </div>
+
+    <!-- Main content (shown when on LinkedIn) -->
+    <div id="mainContent" hidden>
+      <!-- Current Job Section -->
+      <section class="section">
+        <div class="section__head">
+          <span class="section__label">Current Job</span>
+        </div>
+        <div id="currentJobCard" class="job-card job-card--current">
+          <p class="job-card__loading">Loading job details…</p>
+        </div>
+        <div class="btn-row">
+          <button id="copyCurrentBtn" class="btn btn--primary" disabled>
+            📋 Copy Job Description
+          </button>
+          <button id="copyMinimalBtn" class="btn btn--ghost" disabled title="Copy title, company, location & URL only">
+            Copy Summary
+          </button>
+        </div>
+      </section>
+
+      <div class="divider"></div>
+
+      <!-- Job List Section -->
+      <section class="section">
+        <div class="section__head">
+          <span class="section__label">Jobs on This Page</span>
+          <button id="scrapeListBtn" class="btn btn--sm btn--outline">Scrape List</button>
+        </div>
+
+        <div id="jobListState" class="list-empty">
+          <p>Click "Scrape List" to extract all job cards visible on this page.</p>
+        </div>
+
+        <div id="jobList" class="job-list" hidden></div>
+
+        <div id="listActions" class="btn-row" hidden>
+          <button id="copyAllBtn" class="btn btn--primary btn--sm">📋 Copy All as Text</button>
+          <button id="exportCsvBtn" class="btn btn--ghost btn--sm">⬇ Export CSV</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      Works on Chromium browsers · Brave · Edge · Arc
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
