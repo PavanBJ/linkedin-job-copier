@@ -7,12 +7,10 @@
   const BUTTON_ID = 'ljc-copy-btn';
   const TOAST_ID = 'ljc-toast';
 
-  // ─── Selectors (LinkedIn updates DOM occasionally, so we try multiple) ───────
+  // ─── Selectors ───────
   const JOB_TITLE_SELECTORS = [
     '.job-details-jobs-unified-top-card__job-title h1',
     '.jobs-unified-top-card__job-title h1',
-    '.job-details-jobs-unified-top-card__job-title',
-    '.jobs-unified-top-card__job-title',
     'h1.t-24',
     'h1[class*="job-title"]'
   ];
@@ -20,52 +18,51 @@
   const COMPANY_SELECTORS = [
     '.job-details-jobs-unified-top-card__company-name a',
     '.jobs-unified-top-card__company-name a',
-    '.job-details-jobs-unified-top-card__company-name',
-    '.jobs-unified-top-card__company-name',
     'a[class*="company-name"]'
   ];
 
   const LOCATION_SELECTORS = [
     '.job-details-jobs-unified-top-card__bullet',
     '.jobs-unified-top-card__bullet',
-    '.jobs-unified-top-card__workplace-type',
-    'span[class*="workplace-type"]'
+    '.jobs-unified-top-card__workplace-type'
   ];
 
   const DESCRIPTION_SELECTORS = [
     '.jobs-description__content .jobs-box__html-content',
     '.jobs-description-content__text',
     '#job-details',
-    '.jobs-description__container',
-    '[class*="jobs-description"]'
+    '.jobs-description__container'
   ];
 
   const INJECT_ANCHOR_SELECTORS = [
     '.jobs-apply-button--top-card',
+    '.jobs-save-button', 
     '.jobs-unified-top-card__actions',
     '.job-details-jobs-unified-top-card__actions',
-    '.jobs-s-apply',
-    '[class*="top-card__actions"]'
+    '.jobs-s-apply'
   ];
 
-  // ─── Utility: query first matching selector ───────────────────────────────
-  function queryFirst(selectors, root = document) {
+  // ─── Utility: query first VISIBLE matching selector ───────────────────────
+  // This prevents the extension from interacting with hidden "ghost" jobs
+  function queryFirstVisible(selectors) {
     for (const sel of selectors) {
-      const el = root.querySelector(sel);
-      if (el) return el;
+      const elements = document.querySelectorAll(sel);
+      for (const el of elements) {
+        if (el.offsetParent !== null || el.getBoundingClientRect().width > 0) {
+          return el;
+        }
+      }
     }
     return null;
   }
 
   // ─── Extract clean text from job description ──────────────────────────────
   function extractDescription() {
-    const descEl = queryFirst(DESCRIPTION_SELECTORS);
+    const descEl = queryFirstVisible(DESCRIPTION_SELECTORS);
     if (!descEl) return null;
 
-    // Clone so we don't mutate the DOM
     const clone = descEl.cloneNode(true);
 
-    // Replace <br> and block elements with newlines
     clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
     clone.querySelectorAll('li').forEach(li => {
       li.prepend('• ');
@@ -81,15 +78,14 @@
 
   // ─── Build clipboard text ─────────────────────────────────────────────────
   function buildClipboardText() {
-    const titleEl = queryFirst(JOB_TITLE_SELECTORS);
-    const companyEl = queryFirst(COMPANY_SELECTORS);
-    const locationEl = queryFirst(LOCATION_SELECTORS);
+    const titleEl = queryFirstVisible(JOB_TITLE_SELECTORS);
+    const companyEl = queryFirstVisible(COMPANY_SELECTORS);
+    const locationEl = queryFirstVisible(LOCATION_SELECTORS);
     const description = extractDescription();
 
     const title = titleEl?.innerText?.trim() || 'Job Title Not Found';
     const company = companyEl?.innerText?.trim() || 'Company Not Found';
     const location = locationEl?.innerText?.trim() || '';
-
     const url = window.location.href;
 
     let text = `JOB TITLE: ${title}\n`;
@@ -116,7 +112,6 @@
     `;
     document.body.appendChild(toast);
 
-    // Trigger animation
     requestAnimationFrame(() => {
       requestAnimationFrame(() => toast.classList.add('ljc-toast--visible'));
     });
@@ -133,7 +128,6 @@
       await navigator.clipboard.writeText(text);
       return true;
     } catch {
-      // Fallback for older browsers
       try {
         const ta = document.createElement('textarea');
         ta.value = text;
@@ -176,41 +170,40 @@
 
   // ─── Inject the copy button ───────────────────────────────────────────────
   function injectButton() {
-    if (document.getElementById(BUTTON_ID)) return;
+    const anchor = queryFirstVisible(INJECT_ANCHOR_SELECTORS);
+    if (!anchor) return; // No visible anchor found on screen yet
 
-    const anchor = queryFirst(INJECT_ANCHOR_SELECTORS);
-    if (!anchor) return;
+    // If the button is already right next to this anchor, do nothing
+    const existingBtn = document.getElementById(BUTTON_ID);
+    if (existingBtn && existingBtn.previousElementSibling === anchor) {
+      return; 
+    }
 
-    const btn = document.createElement('button');
-    btn.id = BUTTON_ID;
-    btn.className = 'ljc-btn';
-    btn.textContent = '📋 Copy Job Description';
-    btn.title = 'Copy full job description to clipboard';
-    btn.addEventListener('click', () => handleCopyClick(btn));
+    // Otherwise, grab the button (or create it) and move it to the visible job
+    let btn = existingBtn;
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.id = BUTTON_ID;
+      btn.className = 'ljc-btn';
+      btn.textContent = '📋 Copy Job Description';
+      btn.title = 'Copy full job description to clipboard';
+      btn.addEventListener('click', () => handleCopyClick(btn));
+    }
 
-    // Insert after the anchor element
     anchor.insertAdjacentElement('afterend', btn);
   }
 
-  // ─── Observe DOM changes (LinkedIn is a SPA) ─────────────────────────────
-  let debounceTimer = null;
-  const observer = new MutationObserver(() => {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(injectButton, 600);
-  });
-
-  observer.observe(document.body, { childList: true, subtree: true });
-
-  // Initial injection attempt
-  setTimeout(injectButton, 1000);
+  // ─── The Fix: Run a gentle loop instead of an aggressive observer ─────────
+  // Checks once every 1 second. No freezing, no infinite loops!
+  setInterval(injectButton, 1000);
 
   // ─── Message listener for popup scraping ─────────────────────────────────
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.action === 'scrapeCurrentJob') {
       const text = buildClipboardText();
-      const titleEl = queryFirst(JOB_TITLE_SELECTORS);
-      const companyEl = queryFirst(COMPANY_SELECTORS);
-      const locationEl = queryFirst(LOCATION_SELECTORS);
+      const titleEl = queryFirstVisible(JOB_TITLE_SELECTORS);
+      const companyEl = queryFirstVisible(COMPANY_SELECTORS);
+      const locationEl = queryFirstVisible(LOCATION_SELECTORS);
       const description = extractDescription();
 
       sendResponse({
@@ -227,8 +220,7 @@
       const jobs = scrapeJobList();
       sendResponse({ jobs });
     }
-
-    return true; // keep channel open for async
+    return true; 
   });
 
   // ─── Scrape job list cards ────────────────────────────────────────────────
